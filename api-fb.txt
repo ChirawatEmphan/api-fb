@@ -1,0 +1,85 @@
+function getFacebookData() {
+  var accessToken = 'ใส่ของตัวเองที่ได้จาก facebook api';
+  var adAccountId = 'ได้จาก ads managers';
+  var url = 'https://graph.facebook.com/v18.0/act_' + adAccountId + '/campaigns';
+  
+  var params = {
+    'access_token': accessToken,
+    'fields': 'name,objective,status,special_ad_categories,spend,campaign_id,start_time,stop_time,lifetime_budget,daily_budget,insights{impressions,clicks,ctr,reach,frequency,cost_per_inline_link_click,cpc,actions,cost_per_action_type}',
+    'limit': 100,
+    'effective_status': ['ACTIVE', 'PAUSED', 'ARCHIVED']
+  };
+  
+  var options = {
+    'method': 'get',
+    'muteHttpExceptions': true
+  };
+  
+  try {
+    var queryString = Object.keys(params).map(function(key) {
+      if (Array.isArray(params[key])) {
+        return params[key].map(function(value) {
+          return encodeURIComponent(key) + '[]=' + encodeURIComponent(value);
+        }).join('&');
+      }
+      return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+    }).join('&');
+
+    var response = UrlFetchApp.fetch(url + '?' + queryString, options);
+    
+    var responseCode = response.getResponseCode();
+    var responseBody = response.getContentText();
+    
+    Logger.log('Response Code: ' + responseCode);
+    Logger.log('Response Body: ' + responseBody);
+    
+    if (responseCode === 200) {
+      var data = JSON.parse(responseBody);
+      
+      if (data.data && data.data.length > 0) {
+        var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+        sheet.clear(); // Clear existing content
+        
+        // Write headers
+        var headers = ['Campaign Name', 'Objective', 'Status', 'Special Ad Categories', 'Spend', 'Campaign ID', 'Start Time', 'Stop Time', 'Lifetime Budget', 'Daily Budget', 'Results', 'Reach', 'Impressions', 'Cost per Result', 'Amount Spent', 'Ends'];
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        
+        // Write data
+        var rowData = data.data.map(function(row) {
+          var insights = row.insights ? row.insights.data[0] : {};
+          var actions = insights.actions ? insights.actions.find(action => action.action_type === 'link_click') : { value: 0 };
+          var costPerAction = insights.cost_per_action_type ? insights.cost_per_action_type.find(action => action.action_type === 'link_click') : { value: 0 };
+          return [
+            row.name,
+            row.objective,
+            row.status,
+            JSON.stringify(row.special_ad_categories),
+            row.spend,
+            row.campaign_id,
+            row.start_time,
+            row.stop_time,
+            row.lifetime_budget,
+            row.daily_budget ? row.daily_budget / 100 : '',
+            actions.value || '', // Results (จำนวนผลลัพธ์เช่น link clicks)
+            insights.reach || '',
+            insights.impressions || '',
+            costPerAction.value || '', // Cost per Result (ราคาต่อผลลัพธ์เช่น link click)
+            row.spend || '',
+            row.stop_time ? row.stop_time : 'Ongoing'
+          ];
+        });
+        
+        sheet.getRange(2, 1, rowData.length, headers.length).setValues(rowData);
+        
+        SpreadsheetApp.getActiveSpreadsheet().toast('Data updated successfully. ' + rowData.length + ' campaigns found.', 'Success', 5);
+      } else {
+        SpreadsheetApp.getActiveSpreadsheet().toast('No campaign data returned from Facebook API', 'Warning', 5);
+      }
+    } else {
+      SpreadsheetApp.getActiveSpreadsheet().toast('API Error: ' + responseCode + ' - ' + responseBody, 'Error', 5);
+    }
+  } catch (e) {
+    Logger.log('Error: ' + e.toString());
+    SpreadsheetApp.getActiveSpreadsheet().toast('Error: ' + e.toString(), 'Error', 5);
+  }
+}
